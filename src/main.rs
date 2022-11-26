@@ -8,6 +8,7 @@ fn main() {
         .add_plugin(EguiPlugin)
         .add_startup_system(display::install_display)
         .add_system(display::render)
+        .add_system(display::test_render)
         .run();
 }
 
