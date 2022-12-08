@@ -1,5 +1,6 @@
 #[macro_use]
 extern crate lazy_static;
+extern crate rand;
 
 use bevy::prelude::*;
 use bevy::time::FixedTimestep;

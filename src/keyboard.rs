@@ -38,6 +38,10 @@ impl Keyboard {
             keylist: vec![ButtonState::Released; KEYMAP.keys().len()],
         }
     }
+
+    pub fn is_key_pressed(&self, btn: u8) -> bool {
+        return self.keylist[btn as usize] == ButtonState::Pressed;
+    }
 }
 
 pub fn install_keyboard(mut commands: Commands) {
