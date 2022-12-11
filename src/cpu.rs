@@ -1,19 +1,23 @@
 use crate::display;
 use crate::keyboard;
 use bevy::prelude::*;
+use std::fs::File;
+use std::io::Read;
+use bevy::input::keyboard::KeyboardInput;
 const REGISTER_SIZE: usize = 16;
 
 #[derive(Component)]
 pub struct Cpu {
     memory: Vec<u8>,
     registers: [u8; REGISTER_SIZE as usize],
-    address: u8,
+    address: u16,
     delay_timer: u32,
     sound_timer: u32,
-    pc: u32,
-    stack: Vec<u32>,
+    pc: u16,
+    stack: Vec<u16>,
     paused: bool,
     speed: u32,
+    started: bool,
 }
 
 const SPRITE_LENGTH: usize = 80;
@@ -46,8 +50,9 @@ impl Cpu {
             sound_timer: 0,
             pc: 0x200,
             stack: Vec::new(),
-            paused: false,
+            paused: true,
             speed: 10,
+            started: false,
         }
     }
 }
@@ -61,19 +66,31 @@ impl Cpu {
 
     fn update_timers(&mut self) {
         if self.delay_timer > 0 {
-            self.delay_timer -= 0;
+            self.delay_timer -= 1;
         }
 
         if self.sound_timer > 0 {
-            self.sound_timer -= 0;
+            self.sound_timer -= 1;
         }
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.paused
+    }
+
+    pub fn clear_pause(&mut self, key: u8) {
+        let opcode: u16 = ((self.memory[self.pc as usize] as u16) << 8) as u16
+            | (self.memory[(self.pc as usize) + 1 as usize]) as u16;
+        let x = (opcode & 0x0F00) >> 8;
+        self.registers[x as usize] = key;
+        self.paused = false;
     }
 
     fn execute_instruction(
         &mut self,
         opcode: u16,
         display: &mut display::Display,
-        keyboard: &mut keyboard::Keyboard,
+        keyboard: &keyboard::Keyboard,
     ) {
         self.pc += 2;
         let x = (opcode & 0x0F00) >> 8;
@@ -81,17 +98,19 @@ impl Cpu {
 
         match opcode & 0xF000 {
             0x0000 => match opcode {
-                0x00E0 => display.clear(),
+                0x00E0 => {
+                    display.clear();
+                }
                 0x00EE => match self.stack.pop() {
                     Some(instr) => self.pc = instr,
                     None => {}
                 },
                 _ => {}
             },
-            0x1000 => self.pc = (opcode as u16 & 0xFFF as u16) as u32,
+            0x1000 => self.pc = (opcode as u16 & 0xFFF as u16) as u16,
             0x2000 => {
                 self.stack.push(self.pc);
-                self.pc = (opcode as u16 & 0xFFF as u16) as u32;
+                self.pc = (opcode as u16 & 0xFFF as u16) as u16;
             }
             0x3000 => {
                 if self.registers[x as usize] == (opcode & 0xFF as u16) as u8 {
@@ -104,7 +123,7 @@ impl Cpu {
                 }
             }
             0x5000 => {
-                if self.registers[y as usize] == self.registers[y as usize] {
+                if self.registers[x as usize] == self.registers[y as usize] {
                     self.pc += 2;
                 }
             }
@@ -112,27 +131,32 @@ impl Cpu {
                 self.registers[x as usize] = (opcode & 0xFF) as u8;
             }
             0x7000 => {
-                self.registers[x as usize] += (opcode & 0xFF) as u8;
+                self.registers[x as usize] =
+                    self.registers[x as usize].wrapping_add((opcode & 0xFF) as u8);
             }
             0x8000 => match opcode & 0xF {
                 0x0 => self.registers[x as usize] = self.registers[y as usize],
                 0x1 => self.registers[x as usize] |= self.registers[y as usize],
                 0x2 => self.registers[x as usize] &= self.registers[y as usize],
                 0x3 => self.registers[x as usize] ^= self.registers[y as usize],
-                0x4 => {
-                    self.registers[x as usize] += self.registers[y as usize];
-                    let sum = self.registers[x as usize];
-                    self.registers[0xF] = 0;
-                    if sum as u8 > 0xFF as u8 {
+                0x4 => match self.registers[x as usize].checked_add(self.registers[y as usize]) {
+                    Some(value) => {
+                        self.registers[0xF] = 0;
+                        self.registers[x as usize] = value;
+                    }
+                    None => {
+                        self.registers[x as usize] =
+                            self.registers[x as usize].wrapping_add(self.registers[y as usize]);
                         self.registers[0xF] = 1;
                     }
-                }
+                },
                 0x5 => {
                     self.registers[0xF] = 0;
-                    if self.registers[x as usize] > self.registers[y as usize] {
+                    if self.registers[x as usize] < self.registers[y as usize] {
                         self.registers[0xF] = 1;
                     }
-                    self.registers[x as usize] -= self.registers[y as usize];
+                    self.registers[x as usize] =
+                        self.registers[x as usize].wrapping_sub(self.registers[y as usize]);
                 }
                 0x6 => {
                     self.registers[0xF] = self.registers[x as usize] & 0x1;
@@ -141,12 +165,12 @@ impl Cpu {
                 0x7 => {
                     self.registers[0xF] = 0;
 
-                    if self.registers[y as usize] > self.registers[x as usize] {
+                    if self.registers[y as usize] < self.registers[x as usize] {
                         self.registers[0xF] = 1;
                     }
 
                     self.registers[x as usize] =
-                        self.registers[y as usize] - self.registers[x as usize];
+                        self.registers[y as usize].wrapping_sub(self.registers[x as usize]);
                 }
                 0xE => {
                     self.registers[0xF] = self.registers[x as usize] & 0x80;
@@ -160,58 +184,90 @@ impl Cpu {
                 }
             }
             0xA000 => {
-                self.address = (opcode & 0xFFF) as u8;
+                self.address = opcode & 0xFFF;
             }
             0xB000 => {
-                self.address = (opcode & 0xFFF) as u8 + self.registers[0];
+                self.address = (opcode & 0xFFF) + self.registers[0] as u16;
             }
             0xC000 => {
                 let rand: u8 = rand::random();
                 self.registers[x as usize] = rand & (opcode & 0xFF) as u8;
             }
             0xD000 => {
-                let width = 8;
-                let height = opcode & 0xF;
+                let x_reg: u8 = self.registers[x as usize] & display::COLS - 1;
+                let y_reg: u8 = self.registers[y as usize] & display::ROWS - 1;
+                let width: u8 = 8;
+                let height: u8 = (opcode & 0xF) as u8;
                 self.registers[0xF] = 0;
-                for row in 1..height {
-                    let mut sprite = self.memory[(self.address + row as u8) as usize];
-                    for col in 1..width {
+                for row in 0..height {
+                    let mut sprite: u8 = self.memory[(self.address + row as u16) as usize];
+                    for col in 0..width {
                         if sprite & 0x80 > 0 {
-                            if display.set_pixel(
-                                self.registers[x as usize] + col as u8,
-                                self.registers[y as usize] + row as u8,
-                            ) {
-                                self.registers[0xF] = 1;
+                            if !display
+                                .is_offscreen(x_reg.wrapping_add(col), y_reg.wrapping_add(row))
+                            {
+                                if display
+                                    .set_pixel(x_reg.wrapping_add(col), y_reg.wrapping_add(row))
+                                {
+                                    self.registers[0xF] = 1;
+                                }
+                            } else {
+                                break;
                             }
                         }
-
                         sprite <<= 1;
                     }
                 }
             }
             0xE000 => match opcode & 0xFF {
                 0x9E => {
-                    if keyboard.is_key_pressed(self.registers[x as usize]) {
+                    if keyboard.is_key_pressed(self.registers[x as usize] as u8) {
                         self.pc += 2;
                     }
                 }
                 0xA1 => {
-                    if !keyboard.is_key_pressed(self.registers[x as usize]) {
+                    if !keyboard.is_key_pressed(self.registers[x as usize] as u8) {
                         self.pc += 2;
                     }
                 }
                 _ => {}
             },
             0xF000 => match opcode & 0xFF {
-                0x07 => {}
-                0x0A => {}
-                0x15 => {}
-                0x18 => {}
-                0x1E => {}
-                0x29 => {}
-                0x33 => {}
-                0x55 => {}
-                0x65 => {}
+                0x07 => {
+                    self.registers[x as usize] = self.delay_timer as u8;
+                }
+                0x0A => {
+                    self.paused = true;
+                }
+                0x15 => {
+                    self.delay_timer = self.registers[x as usize] as u32;
+                }
+                0x18 => {
+                    self.sound_timer = self.registers[x as usize] as u32;
+                }
+                0x1E => {
+                    self.address += self.registers[x as usize] as u16;
+                }
+                0x29 => {
+                    self.address = self.registers[x as usize].wrapping_mul(5) as u16;
+                }
+                0x33 => {
+                    self.memory[self.address as usize] = (self.registers[x as usize] / 100) as u8;
+                    self.memory[self.address as usize + 1 as usize] =
+                        ((self.registers[x as usize] % 100) / 10) as u8;
+                    self.memory[self.address as usize + 2 as usize] =
+                        (self.registers[x as usize] % 10) as u8;
+                }
+                0x55 => {
+                    for reg in 0..(x+1){
+                        self.memory[self.address as usize + reg as usize] = self.registers[reg as usize] as u8;
+                    }
+                }
+                0x65 => {
+                    for reg in 0..(x+1) {
+                        self.registers[reg as usize] = self.memory[reg as usize + self.address as usize];
+                    }
+                }
                 _ => {}
             },
             _ => {}
@@ -232,19 +288,18 @@ pub fn cpu_event_handler(
     for program in ev_cpu.iter() {
         let path_wrapped = program.path.as_path();
         if let Some(path) = path_wrapped.to_str() {
-            match std::fs::read(path) {
-                Ok(bytes) => {
-                    let mut cpu = query.single_mut();
-                    const OFFSET: usize = 0x200;
-                    let memory = cpu.memory.as_mut_ptr() as usize + OFFSET;
-                    let len = std::cmp::min(cpu.memory.len() - OFFSET, bytes.len());
-                    unsafe {
-                        std::ptr::copy_nonoverlapping(bytes.as_ptr(), memory as *mut u8, len);
+            let mut cpu: &mut Cpu = &mut query.single_mut();
+            cpu.paused = true;
+            cpu.started = false;
+            const OFFSET: usize = 0x200;
+            if let Ok(mut f) = File::open(path) {
+                match f.read(&mut cpu.memory[OFFSET..]) {
+                    Ok(_) => {
+                        cpu.pc = OFFSET as u16;
+                        cpu.started = true;
+                        cpu.paused = false;
                     }
-                    cpu.pc = 0;
-                }
-                Err(e) => {
-                    print!("{}", e);
+                    Err(err) => println!("Error Reading File {err}"),
                 }
             }
         }
@@ -254,21 +309,18 @@ pub fn cpu_event_handler(
 pub fn update_cpu(
     mut cpu_query: Query<&mut Cpu>,
     mut display_query: Query<&mut display::Display>,
-    mut keyboard_query: Query<&mut keyboard::Keyboard>,
+    keyboard_query: Query<&keyboard::Keyboard>,
 ) {
-    //let (mut cpu, mut display, mut keyboard) = query.single_mut();
-    let mut cpu = cpu_query.single_mut();
-    let mut display = display_query.single_mut();
-    let mut keyboard = keyboard_query.single_mut();
-    for _ in 0..cpu.speed {
-        if !cpu.paused {
-            let opcode: u16 = ((cpu.memory[cpu.pc as usize] as u16) << 8) as u16
-                | (cpu.memory[(cpu.pc as usize) + 1 as usize]) as u16;
-            cpu.execute_instruction(opcode, &mut display, &mut keyboard);
-        }
+    let cpu: &mut Cpu = &mut cpu_query.single_mut();
+    if cpu.started && !cpu.paused {
+        let mut display: &mut display::Display = &mut display_query.single_mut();
+        let keyboard: &keyboard::Keyboard = &keyboard_query.single();
+        let opcode: u16 = ((cpu.memory[cpu.pc as usize] as u16) << 8) as u16
+            | (cpu.memory[(cpu.pc as usize) + 1 as usize]) as u16;
+        cpu.execute_instruction(opcode, &mut display, &keyboard);
     }
 
-    if !cpu.paused {
+    if cpu.started && !cpu.paused {
         cpu.update_timers();
     }
 }

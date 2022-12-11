@@ -1,61 +1,112 @@
 use std::collections::HashMap;
 
-use bevy::prelude::*;
-use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
+use bevy::input::ButtonState;
+use bevy::prelude::*;
+use crate::cpu;
+
+static ONE: u8 = 1;
+static TWO: u8 = 2;
+static THREE: u8 = 3;
+static FOUR: u8 = 0xC;
+static Q: u8 = 0x4;
+static W: u8 = 0x5;
+static E: u8 = 0x6;
+static R: u8 = 0xD;
+static A: u8 = 0x7;
+static S: u8 = 0x8;
+static D: u8 = 0x9;
+static F: u8 = 0xE;
+static Z: u8 = 0xA;
+static X: u8 = 0x0;
+static C: u8 = 0xB;
+static V: u8 = 0xF;
 
 lazy_static! {
-static ref KEYMAP: HashMap<KeyCode, u8> = {
+    static ref KEYMAP: HashMap<KeyCode, u8> = {
         HashMap::from([
-            (KeyCode::Key1, 0x1),
-            (KeyCode::Key2, 0x2),
-            (KeyCode::Key3, 0x3),
-            (KeyCode::Key4, 0xc),
-            (KeyCode::Q, 0x4),
-            (KeyCode::W, 0x5),
-            (KeyCode::E, 0x6),
-            (KeyCode::R, 0xD),
-            (KeyCode::A, 0x7),
-            (KeyCode::S, 0x8),
-            (KeyCode::D, 0x9),
-            (KeyCode::F, 0xE),
-            (KeyCode::Z, 0xA),
-            (KeyCode::X, 0x0),
-            (KeyCode::C, 0xB),
-            (KeyCode::V, 0xF),
+            (KeyCode::Key1, ONE),
+            (KeyCode::Key2, TWO),
+            (KeyCode::Key3, THREE),
+            (KeyCode::Key4, FOUR),
+            (KeyCode::Q, Q),
+            (KeyCode::W, W),
+            (KeyCode::E, E),
+            (KeyCode::R, R),
+            (KeyCode::A, A),
+            (KeyCode::S, S),
+            (KeyCode::D, D),
+            (KeyCode::F, F),
+            (KeyCode::Z, Z),
+            (KeyCode::X, X),
+            (KeyCode::C, C),
+            (KeyCode::V, V),
         ])
     };
 }
 
 #[derive(Component)]
 pub struct Keyboard {
-    keylist: Vec<ButtonState>,
+    key_list: HashMap<u8, bool>,
 }
 
 impl Keyboard {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
-            keylist: vec![ButtonState::Released; KEYMAP.keys().len()],
+            key_list: HashMap::from([
+                (ONE, false),
+                (TWO, false),
+                (THREE, false),
+                (FOUR, false),
+                (Q, false),
+                (W, false),
+                (E, false),
+                (R, false),
+                (A, false),
+                (S, false),
+                (D, false),
+                (F, false),
+                (Z, false),
+                (X, false),
+                (C, false),
+                (V, false),
+            ]),
         }
     }
 
-    pub fn is_key_pressed(&self, btn: u8) -> bool {
-        return self.keylist[btn as usize] == ButtonState::Pressed;
+    pub fn is_key_pressed(&self, x: u8) -> bool {
+        match self.key_list.get(&x) {
+            Some(value) => *value,
+            None => false,
+        }
+    }
+}
+
+pub fn keyboard_events(
+    mut keyboard: Query<&mut Keyboard>,
+    mut cpu: Query<&mut cpu::Cpu>,
+    mut key_ver: EventReader<KeyboardInput>,
+) {
+    let mut keyboard_map = keyboard.single_mut();
+    let mut cpu_comp = cpu.single_mut();
+    for ev in key_ver.iter() {
+        if let Some(keycode) = ev.key_code {
+            if KEYMAP.contains_key(&keycode) {
+                let code: u8 = KEYMAP[&keycode];
+                *keyboard_map
+                    .key_list
+                    .entry(code)
+                    .or_insert(ev.state == ButtonState::Pressed) = ev.state == ButtonState::Pressed;
+
+                if cpu_comp.is_paused() && ev.state == ButtonState::Pressed {
+                   cpu_comp.clear_pause(code); 
+                }
+            }
+        }
     }
 }
 
 pub fn install_keyboard(mut commands: Commands) {
-    commands.spawn(Keyboard::new());
-}
-
-pub fn handle_keyboard(mut key_evr: EventReader<KeyboardInput>, mut query: Query<&mut Keyboard>) {
-    for ev in key_evr.iter() {
-        if let Some(keycode) = ev.key_code {
-        let mut board = query.single_mut();
-            if let Some(index) = KEYMAP.get(&keycode) {
-                board.keylist[*index as usize] = ev.state;
-            }
-        }
-
-    }
+    let mut keyboard: Keyboard = Keyboard::new();
+    commands.spawn(keyboard);
 }
