@@ -6,6 +6,8 @@ use std::path::PathBuf;
 
 pub const COLS: u8 = 64;
 pub const ROWS: u8 = 32;
+pub const SCALE: u8 = 10;
+pub const MENU: u8 = 40;
 pub const SCREEN_SIZE: usize = COLS as usize * ROWS as usize;
 
 #[derive(Component)]
@@ -47,7 +49,7 @@ impl Display {
 }
 
 pub fn install_display(mut commands: Commands) {
-    commands.spawn(Display::new(10));
+    commands.spawn(Display::new(SCALE));
 }
 
 pub fn render(

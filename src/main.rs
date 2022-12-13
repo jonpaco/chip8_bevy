@@ -18,8 +18,7 @@ fn main() {
         .add_plugins(DefaultPlugins.set( WindowPlugin {
                 window: WindowDescriptor {
                 title: "Chip8".to_string(),
-                present_mode: PresentMode::Immediate,
-                resizable: true,
+                present_mode: PresentMode::AutoNoVsync,
                 ..default()
                 },
                 ..default()
@@ -30,14 +29,9 @@ fn main() {
         .add_startup_system(speaker::install_speaker)
         .add_startup_system(cpu::install_cpu)
         .add_startup_system(keyboard::install_keyboard)
-        .add_system(keyboard::keyboard_events)
-        .add_system(display::render)
         .add_system(cpu::cpu_event_handler)
-        .add_system_set(
-            SystemSet::new()
-            .with_run_criteria(FixedTimestep::step(1.0/60.0))
-            .with_system(cpu::update_cpu)
-        )
+        .add_system(display::render)
+        .add_system(cpu::update_cpu)
         .run();
 }
 

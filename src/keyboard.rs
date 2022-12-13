@@ -23,7 +23,7 @@ static C: u8 = 0xB;
 static V: u8 = 0xF;
 
 lazy_static! {
-    static ref KEYMAP: HashMap<KeyCode, u8> = {
+    pub static ref KEYMAP: HashMap<KeyCode, u8> = {
         HashMap::from([
             (KeyCode::Key1, ONE),
             (KeyCode::Key2, TWO),
@@ -73,12 +73,12 @@ impl Keyboard {
             ]),
         }
     }
+}
 
-    pub fn is_key_pressed(&self, x: u8) -> bool {
-        match self.key_list.get(&x) {
-            Some(value) => *value,
-            None => false,
-        }
+pub fn is_key_pressed(input: &Res<Input<KeyCode>>, x: u8) -> bool {
+    match KEYMAP.iter().find_map(|(&key, &value)| { if value == x && input.any_pressed([key]) {Some(value)} else {None}}) {
+        Some(_) => {true},
+        None => {false}
     }
 }
 

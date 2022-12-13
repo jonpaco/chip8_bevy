@@ -90,7 +90,7 @@ impl Cpu {
         &mut self,
         opcode: u16,
         display: &mut display::Display,
-        keyboard: &keyboard::Keyboard,
+        input: &Res<Input<KeyCode>>
     ) {
         self.pc += 2;
         let x = (opcode & 0x0F00) >> 8;
@@ -152,7 +152,7 @@ impl Cpu {
                 },
                 0x5 => {
                     self.registers[0xF] = 0;
-                    if self.registers[x as usize] < self.registers[y as usize] {
+                    if self.registers[x as usize] > self.registers[y as usize] {
                         self.registers[0xF] = 1;
                     }
                     self.registers[x as usize] =
@@ -165,7 +165,7 @@ impl Cpu {
                 0x7 => {
                     self.registers[0xF] = 0;
 
-                    if self.registers[y as usize] < self.registers[x as usize] {
+                    if self.registers[y as usize] > self.registers[x as usize] {
                         self.registers[0xF] = 1;
                     }
 
@@ -203,16 +203,10 @@ impl Cpu {
                     let mut sprite: u8 = self.memory[(self.address + row as u16) as usize];
                     for col in 0..width {
                         if sprite & 0x80 > 0 {
-                            if !display
-                                .is_offscreen(x_reg.wrapping_add(col), y_reg.wrapping_add(row))
+                            if display
+                                .set_pixel(x_reg.wrapping_add(col), y_reg.wrapping_add(row))
                             {
-                                if display
-                                    .set_pixel(x_reg.wrapping_add(col), y_reg.wrapping_add(row))
-                                {
-                                    self.registers[0xF] = 1;
-                                }
-                            } else {
-                                break;
+                                self.registers[0xF] = 1;
                             }
                         }
                         sprite <<= 1;
@@ -221,12 +215,12 @@ impl Cpu {
             }
             0xE000 => match opcode & 0xFF {
                 0x9E => {
-                    if keyboard.is_key_pressed(self.registers[x as usize] as u8) {
+                    if keyboard::is_key_pressed(&input, self.registers[x as usize] as u8) {
                         self.pc += 2;
                     }
                 }
                 0xA1 => {
-                    if !keyboard.is_key_pressed(self.registers[x as usize] as u8) {
+                    if !keyboard::is_key_pressed(&input, self.registers[x as usize] as u8) {
                         self.pc += 2;
                     }
                 }
@@ -309,15 +303,23 @@ pub fn cpu_event_handler(
 pub fn update_cpu(
     mut cpu_query: Query<&mut Cpu>,
     mut display_query: Query<&mut display::Display>,
-    keyboard_query: Query<&keyboard::Keyboard>,
+    input: Res<Input<KeyCode>>
 ) {
     let cpu: &mut Cpu = &mut cpu_query.single_mut();
+
+    if cpu.paused {
+        keyboard::KEYMAP.iter().for_each(|(key, &value)| {
+           if input.just_pressed(*key) {
+               cpu.clear_pause(value);
+           }
+        });
+    }
+
     if cpu.started && !cpu.paused {
         let mut display: &mut display::Display = &mut display_query.single_mut();
-        let keyboard: &keyboard::Keyboard = &keyboard_query.single();
         let opcode: u16 = ((cpu.memory[cpu.pc as usize] as u16) << 8) as u16
             | (cpu.memory[(cpu.pc as usize) + 1 as usize]) as u16;
-        cpu.execute_instruction(opcode, &mut display, &keyboard);
+        cpu.execute_instruction(opcode, &mut display, &input);
     }
 
     if cpu.started && !cpu.paused {
